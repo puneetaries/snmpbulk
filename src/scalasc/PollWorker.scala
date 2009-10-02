@@ -7,6 +7,7 @@
 
 package scalasc
 import org.snmp4j.smi.Address
+import org.snmp4j.TimeoutModel
 import org.snmp4j.smi._
 import org.snmp4j.transport.DefaultUdpTransportMapping
 import org.snmp4j.util.DefaultPDUFactory
@@ -26,23 +27,31 @@ import scala.collection.jcl._
 
 class PollWorker extends Thread {
 
+    class MyTimeoutPolicy extends AnyRef with TimeoutModel {
+        var to = 25L
+        override def getRequestTimeout(totalNumberOfRetries:Int, targetTimeout:Long) : long = { to }
+        override def getRetryTimeout(retryCount:Int, totalNumberOfRetries:Int, targetTimeout:Long) : Long = {
+            if ( retryCount > 0 )
+                -1L
+            else
+                to
+        }
+    }
+
     override def run : Unit = {
         
         // setup listener
         val transport = new DefaultUdpTransportMapping()
         val snmp = new Snmp(transport)
+        snmp.setTimeoutModel(new MyTimeoutPolicy)
         transport.listen()
 
         val targetAddress1 = GenericAddress.parse("udp:192.168.0.197/161")
         val target1 = new CommunityTarget(targetAddress1, new OctetString("public"))
-        target1.setRetries(2)
-        target1.setTimeout(1500)
         target1.setVersion(SnmpConstants.version2c)
 
         val targetAddress2 = GenericAddress.parse("udp:192.168.0.198/161")
         val target2 = new CommunityTarget(targetAddress2, new OctetString("public"))
-        target2.setRetries(2)
-        target2.setTimeout(1500)
         target2.setVersion(SnmpConstants.version2c)
 
         val ifDesc = new OID("1.3.6.1.2.1.2.2.1.2")
@@ -60,20 +69,31 @@ class PollWorker extends Thread {
                 // otherwise a memory leak is created! Not canceling a request
                 // immediately can be useful when sending a request to a broadcast
                 // address.
-                event.getSource().asInstanceOf[Snmp].cancel(event.getRequest(), this)
-                println("Thread " + Thread.currentThread.getName + " response from: " + event.getPeerAddress + " with id: " + event.getResponse.getRequestID)
-               // println("Received response PDU is: "+event.getResponse())
-                val r = event.getResponse()
-                val vb = r.get(0)
-                val v = vb.getVariable()
-                print("{ ")
-                v match {
-                    case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
-                    case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
-                    case _ => print (" " + v + " ")
+                try {
+                    event.getSource().asInstanceOf[Snmp].cancel(event.getRequest(), this)
+                    println("Thread " + Thread.currentThread.getName + 
+                        " response from: " + event.getPeerAddress + 
+                        " with id: " + (if (event.getResponse == null ) -1 else event.getResponse.getRequestID)  )
                 }
-                println(" } ")
-                
+                catch { case e:Exception => e.printStackTrace }
+                // println("Received response PDU is: "+event.getResponse())
+                if ( event != null ) {
+                    val r = event.getResponse()
+                    if ( r != null && r.size > 0 ) {
+                        val vb = r.get(0)
+                        val v = vb.getVariable()
+                        print("{ ")
+                        v match {
+                            case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
+                            case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
+                            case _ => print (" " + v + " ")
+                        }
+                        println(" } ")
+                    } else {
+                        println("empty response")
+                    }
+
+                }
             }
         }
         snmp.sendPDU(pdu1, target1, null, listener)
