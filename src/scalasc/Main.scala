@@ -39,7 +39,7 @@ object Main {
         val columns = Array[OID](
             new OID("1.3.6.1.2.1.2.2.1.2"), // ifdescr
               new OID("1.3.6.1.2.1.2.2.1.10"), // in octects
-              new OID("1.3.6.1.2.1.2.2.1.16"), // out octects
+              new OID(".1.3.6.1.2.1.2.2.1.16"), // out octects
         )
         var table = new LinkedList[TableEvent](utils.getTable(target, columns, null, null).asInstanceOf[java.util.LinkedList[TableEvent]])
         //var table = utils.getTable(target, columns, null, null).asInstanceOf[LinkedList[TableEvent]]
@@ -50,14 +50,17 @@ object Main {
             if ( e.getColumns()!=null )
                 for ( vb:VariableBinding <- e.getColumns() )
                 {
-                    print("{ " + vb.getOid())
-                    //+ " = " + vb.getVariable().toString() +
-                    val v = vb.getVariable()
-                    v match {
-                        case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
-                        case _ => print (" " + v + " ")
+                    if ( vb!=null ) {
+                        print("{ " + vb.getOid())
+                        //+ " = " + vb.getVariable().toString() +
+                        val v = vb.getVariable()
+                        v match {
+                            case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
+                            case _ => print (" " + v + " ")
+                        }
+                        print(" } ")
                     }
-                    print(" } ")
+                    else { println("null variable here") }
                 }
             else
                 System.err.println("err: " + e.getErrorMessage())
@@ -79,7 +82,7 @@ object Main {
         val columns = Array[OID](
             new OID("1.3.6.1.2.1.2.2.1.2"), // ifdescr
               new OID("1.3.6.1.2.1.2.2.1.10"), // in octects
-              new OID("1.3.6.1.2.1.2.2.1.16"), // out octects
+              new OID(".1.3.6.1.2.1.2.2.1.16"), // out octects
         )
 
         var tl = new TableListener() {
@@ -96,7 +99,7 @@ object Main {
             }
 
             override def next(event:TableEvent) : boolean = {
-                System.out.println("tick last")
+                System.out.println("tick last Thread " + Thread.currentThread.getName)
                 if ( event.getColumns()!=null )
                     for ( vb:VariableBinding <- event.getColumns() )
                     {
@@ -127,8 +130,12 @@ object Main {
      * @param args the command line arguments
      */
     def main(args: Array[String]) :Unit = {
-        println("Hello, world!")
-        testPollAsync()
+        println("main start")
+//        testPollAsync()
+        var p = new PollWorker()
+        p.start()
+        p.join()
+        println("main complete")
     }
 
 }
