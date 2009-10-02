@@ -28,7 +28,7 @@ import scala.collection.jcl._
 class PollWorker extends Thread {
 
     class MyTimeoutPolicy extends AnyRef with TimeoutModel {
-        var to = 25L
+        var to = 100L
         override def getRequestTimeout(totalNumberOfRetries:Int, targetTimeout:Long) : long = { to }
         override def getRetryTimeout(retryCount:Int, totalNumberOfRetries:Int, targetTimeout:Long) : Long = {
             if ( retryCount > 0 )
@@ -57,7 +57,9 @@ class PollWorker extends Thread {
         val ifDesc = new OID("1.3.6.1.2.1.2.2.1.2")
         val pdu1 = new PDU()
         pdu1.add(new VariableBinding(ifDesc))
-        pdu1.setType(PDU.GETNEXT)
+        pdu1.setMaxRepetitions(25)
+        //pdu1.setErrorIndex(25);
+        pdu1.setType(PDU.GETBULK)
 
         val pdu2 = new PDU()
         pdu2.add(new VariableBinding(ifDesc))
@@ -80,15 +82,17 @@ class PollWorker extends Thread {
                 if ( event != null ) {
                     val r = event.getResponse()
                     if ( r != null && r.size > 0 ) {
-                        val vb = r.get(0)
-                        val v = vb.getVariable()
-                        print("{ ")
-                        v match {
-                            case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
-                            case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
-                            case _ => print (" " + v + " ")
+                        for ( i <- 0 to r.size-1) {
+                            val vb = r.get(i)
+                            val v = vb.getVariable()
+                            print("i: " + i + "{ ")
+                            v match {
+                                case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
+                                case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
+                                case _ => print (" " + v + " ")
+                            }
+                            println(" } ")
                         }
-                        println(" } ")
                     } else {
                         println("empty response")
                     }
