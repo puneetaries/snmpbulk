@@ -82,7 +82,7 @@ object Main {
         val columns = Array[OID](
             new OID("1.3.6.1.2.1.2.2.1.2"), // ifdescr
               new OID("1.3.6.1.2.1.2.2.1.10"), // in octects
-              new OID(".1.3.6.1.2.1.2.2.1.16"), // out octects
+              new OID("1.3.6.1.2.1.2.2.1.16"), // out octects
         )
 
         var tl = new TableListener() {
