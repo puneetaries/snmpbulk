@@ -34,6 +34,8 @@ class PollWorker extends Thread {
         var _dataSing = new Array[VariableBinding](colSing.length)
         var completion=colBulk.length + colSing.length
         for( i <- 0 to colBulk.length-1) { _dataBulk(i) = new scala.collection.mutable.LinkedHashMap[Int,VariableBinding]() }
+        var bulkTiming = List[long]()
+        var singTiming = List[long]()
         val targetAddress = GenericAddress.parse("udp:" + _ip + "/161")
         val target = new CommunityTarget(targetAddress, new OctetString("public"))
         target.setVersion(SnmpConstants.version2c)
@@ -55,6 +57,13 @@ class PollWorker extends Thread {
                     }
                     _dataBulk(i).clear
                 }
+                println("Bulk timings:")
+                for(l <- bulkTiming) print(" " + l/(1000000))
+                println()
+                println("Single timings: ")
+                for(l <- singTiming) print(" " + l/1000000)
+                println()
+
             }
         }
         def printVariable(i:int, v:Variable):Unit =
@@ -94,7 +103,7 @@ class PollWorker extends Thread {
                 currPDU.setMaxRepetitions(5)
                 currPDU.setType(PDU.GETBULK)
                 snmp.sendPDU(currPDU, target, null, listenerBulk)
-                outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,this, index, -1))
+                outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,this, index, -1,System.nanoTime))
                 println("sent bulk " + currPDU.getRequestID.toInt + " for " + oid)
                 index += 1
             }
@@ -104,7 +113,7 @@ class PollWorker extends Thread {
                 currPDU.add(new VariableBinding(oid))
                 currPDU.setType(PDU.GETNEXT)
                 snmp.sendPDU(currPDU, target, null, listenerSing)
-                outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,this, -1, index))
+                outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,this, -1, index,System.nanoTime))
                 println("sent single " + currPDU.getRequestID.toInt + " for " + oid)
                 index += 1
             }
@@ -115,11 +124,13 @@ class PollWorker extends Thread {
             currPDU.setMaxRepetitions(5)
             currPDU.setType(PDU.GETBULK)
             snmp.sendPDU(currPDU, target, null, listener)
-            outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,baseOid,this, index, -1))
+            outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,baseOid,this, index, -1,System.nanoTime))
             println("sent " + currPDU.getRequestID + " for " + nextOid)
         }
+        def recordBulkTiming(t:long):Unit={bulkTiming += t}
+        def recordSingTiming(t:long):Unit={singTiming += t}
     }
-    case class OutStanding(requestId:int, baseOid:OID, pollTarget:PollTarget, colBulkIndex:Int, colSingIndex:Int)
+    case class OutStanding(requestId:int, baseOid:OID, pollTarget:PollTarget, colBulkIndex:int, colSingIndex:int, lastTime:long)
 
     var targets =Map[String,PollTarget]()
     var outStanding = new ConcurrentHashMap[Int,OutStanding]()
@@ -156,6 +167,7 @@ class PollWorker extends Thread {
             }
             catch { case e:Exception => e.printStackTrace }
             val out = outStanding.remove(event.getRequest.getRequestID.toInt)
+            val responseTime = System.nanoTime - out.lastTime
             if ( event != null ) {
                 val r = event.getResponse()
                 if ( r != null && r.size == 1 ) {
@@ -164,6 +176,7 @@ class PollWorker extends Thread {
                     val target = targets.get(ip)
                     target.get.dataSing(out.colSingIndex)=r.get(0)
                     target.get.doCompletion()
+                    target.get.recordSingTiming(responseTime)
                 }
             }
         }
@@ -194,7 +207,7 @@ class PollWorker extends Thread {
             }
             catch { case e:Exception => e.printStackTrace }
             val out = outStanding.remove(event.getRequest.getRequestID.toInt)
-
+            val responseTime = System.nanoTime - out.lastTime
             // println("Received response PDU is: "+event.getResponse())
             if ( event != null ) {
                 val r = event.getResponse()
@@ -236,6 +249,7 @@ class PollWorker extends Thread {
                         }
 
                     }
+                    target.get.recordBulkTiming(responseTime)
 
                     if ( !jumpedRails) {
                         // we are not done yet so get next oid
