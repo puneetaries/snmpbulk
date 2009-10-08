@@ -130,12 +130,17 @@ object Main {
      * @param args the command line arguments
      */
     def main(args: Array[String]) :Unit = {
-        println("main start")
-//        testPollAsync()
-        var p = new PollWorker()
-        p.start()
-        p.join()
-        println("main complete")
+
+        // 127.0.0.1/161/public
+        try{
+            var workers = args.map[PollWorker]{ target => new PollWorker(Array(TargetSpec(target)), this) }
+            workers.foreach( t => t.start)
+            workers.foreach( t => t.join)
+            println("main complete")
+        }
+        catch {
+            case e: Exception => println(e)
+        }
     }
 
 }

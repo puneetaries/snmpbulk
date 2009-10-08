@@ -26,44 +26,54 @@ import java.util.concurrent.ConcurrentHashMap
 
 //import scala.collection.jcl._
 
-class PollWorker extends Thread {
+case class TargetSpec(ip:String, port:Int, community:String)
+// multi constructor pattern
+object TargetSpec {
+    def apply(targetString:String) = {
+        var parts=targetString.split("/")
+        if ( parts.length<3 )
+            throw new RuntimeException("Cannot parse target string: " + targetString)
+        new TargetSpec(parts(0), parts(1).toInt, parts(2))
+    }
+}
+
+class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
 
 
-    class PollTarget(_ip:String, colBulk:Array[OID], colSing:Array[OID]) {
-        var _dataBulk = new Array[scala.collection.mutable.LinkedHashMap[Int,VariableBinding]](colBulk.length)
-        var _dataSing = new Array[VariableBinding](colSing.length)
+    case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
+        var dataBulk = new Array[scala.collection.mutable.LinkedHashMap[Int,VariableBinding]](colBulk.length)
+        var dataSing = new Array[VariableBinding](colSing.length)
         var completion=colBulk.length + colSing.length
-        for( i <- 0 to colBulk.length-1) { _dataBulk(i) = new scala.collection.mutable.LinkedHashMap[Int,VariableBinding]() }
+        for( i <- 0 to colBulk.length-1) { dataBulk(i) = new scala.collection.mutable.LinkedHashMap[Int,VariableBinding]() }
         var bulkTiming = List[long]()
         var singTiming = List[long]()
-        val targetAddress = GenericAddress.parse("udp:" + _ip + "/161")
+        val targetAddress = GenericAddress.parse("udp:" + ip + "/161")
         val target = new CommunityTarget(targetAddress, new OctetString("public"))
         target.setVersion(SnmpConstants.version2c)
-        def dataBulk() = _dataBulk
-        def dataSing() = _dataSing
         def doCompletion() : Unit = {
             completion -= 1
             if ( completion== 0) {
-                for( i <- 0 to colSing.length-1) {
-                    print("oid: " + colSing(i) + "=")
-                    printVariable(0,_dataSing(i).getVariable)
-                    _dataSing(i)=null
-                }
-                for(i <- 0 to colBulk.length-1){
-                    println("oid: " + colBulk(i))
-                    for(i_oid <- _dataBulk(i).keys ) {
-                        val v = _dataBulk(i)(i_oid).getVariable()
-                        printVariable(i_oid, v)
+                iolock.synchronized {
+                    for( i <- 0 to colSing.length-1) {
+                        print("oid: " + colSing(i) + "=")
+                        printVariable(0,dataSing(i).getVariable)
+                        dataSing(i)=null
                     }
-                    _dataBulk(i).clear
+                    for(i <- 0 to colBulk.length-1){
+                        println("oid: " + colBulk(i))
+                        for(i_oid <- dataBulk(i).keys ) {
+                            val v = dataBulk(i)(i_oid).getVariable()
+                            printVariable(i_oid, v)
+                        }
+                        dataBulk(i).clear
+                    }
+                    println("Bulk timings:")
+                    for(l <- bulkTiming) print(" " + l/(1000000))
+                    println()
+                    println("Single timings: ")
+                    for(l <- singTiming) print(" " + l/1000000)
+                    println()
                 }
-                println("Bulk timings:")
-                for(l <- bulkTiming) print(" " + l/(1000000))
-                println()
-                println("Single timings: ")
-                for(l <- singTiming) print(" " + l/1000000)
-                println()
-
             }
         }
         def printVariable(i:int, v:Variable):Unit =
@@ -92,7 +102,6 @@ class PollWorker extends Thread {
         
         
 
-        def ip() = _ip
         var currPDU = new PDU()
 
         def sendInitialPDU(snmp:Snmp, listenerBulk:ResponseListener, listenerSing:ResponseListener) : Unit = {
@@ -222,7 +231,7 @@ class PollWorker extends Thread {
                     var i = 0
                     // slight violation of encapsulation but faster this way since we
                     // must walk the result the result for jumping
-                    var d = target.get.dataBulk()(out.colBulkIndex)
+                    var d = target.get.dataBulk(out.colBulkIndex)
                     //var d = dd(out.colIndex)
                     for ( i <- 0 to r.size-1) {
                         val vb = r.get(i)
@@ -278,6 +287,7 @@ class PollWorker extends Thread {
         
         // setup listener
         snmp.setTimeoutModel(new MyTimeoutPolicy)
+        // spawns the actual listening thread
         transport.listen()
         val listenerBulk = new ReceiverBulk
         val listenerSing = new ReceiverSingle
@@ -287,8 +297,12 @@ class PollWorker extends Thread {
         val pollsetBulk:Array[OID] = Array[OID](new OID("1.3.6.1.2.1.2.2.1.2"),  new OID("1.3.6.1.2.1.2.2.1.10"),  new OID("1.3.6.1.2.1.2.2.1.16"))
         val pollsetSing:Array[OID] = Array[OID](new OID(".1.3.6.1.2.1.1.3"), new OID(".1.3.6.1.2.1.1.1"))
 
-        targets = Map("192.168.0.198/161" -> new PollTarget("192.168.0.198", pollsetBulk, pollsetSing), 
-                      "127.0.0.1/161"     -> new PollTarget("127.0.0.1", pollsetBulk, pollsetSing) )
+        targets = Map()
+        for ( target <- targetset ) {
+            targets += target.ip + "/" + target.port.toString -> new PollTarget(target.ip, pollsetBulk, pollsetSing)
+        }
+//        targets = Map("192.168.0.198/161" -> new PollTarget("192.168.0.198", pollsetBulk, pollsetSing),
+//                      "127.0.0.1/161"     -> new PollTarget("127.0.0.1", pollsetBulk, pollsetSing) )
 
         //val pollset:Array[OID] = Array[OID](new OID("1.3.6.1.2.1.2.2.1.2"))
         //targets = Map("127.0.0.1/161" -> new PollTarget("127.0.0.1", pollset) )
