@@ -132,8 +132,9 @@ object Main {
     def main(args: Array[String]) :Unit = {
 
         // 127.0.0.1/161/public
+        var index=0
         try{
-            var workers = args.map[PollWorker]{ target => new PollWorker(Array(TargetSpec(target)), this) }
+            var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "THREAD:" + index, this) }
             workers.foreach( t => t.start)
             workers.foreach( t => t.join)
             println("main complete")

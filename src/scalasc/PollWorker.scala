@@ -20,9 +20,11 @@ import org.snmp4j.PDU
 import org.snmp4j.TransportMapping
 import org.snmp4j.mp._
 import org.snmp4j.event._
+import org.snmp4j.DefaultTimeoutModel
 import java.lang.Thread
 import org.snmp4j.util._
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 
 //import scala.collection.jcl._
 
@@ -35,9 +37,20 @@ object TargetSpec {
             throw new RuntimeException("Cannot parse target string: " + targetString)
         new TargetSpec(parts(0), parts(1).toInt, parts(2))
     }
+    def createArray(targetString:String) : List[TargetSpec] = {
+        var targetList = List[TargetSpec]()
+        targetString.split(",").foreach{ target =>
+            var parts=target.split("/")
+            if ( parts.length<3 )
+                throw new RuntimeException("Cannot parse target string: " + targetString)
+printf("%s %d %s\n",parts(0), parts(1).toInt, parts(2))
+            targetList += new TargetSpec(parts(0), parts(1).toInt, parts(2))
+        }
+        targetList
+    }
 }
 
-class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
+class PollWorker(targetset:List[TargetSpec], name:String, iolock:Object) extends Thread {
 
 
     case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
@@ -49,7 +62,13 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
         var singTiming = List[long]()
         val targetAddress = GenericAddress.parse("udp:" + ip + "/161")
         val target = new CommunityTarget(targetAddress, new OctetString("public"))
+        target.setRetries(2)
         target.setVersion(SnmpConstants.version2c)
+        def doCompletionTimeout() : Unit = {
+            completion -= 1
+println("timeout completion")
+            completed.countDown()  // giveup
+        }
         def doCompletion() : Unit = {
             completion -= 1
             if ( completion== 0) {
@@ -73,6 +92,8 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
                     println("Single timings: ")
                     for(l <- singTiming) print(" " + l/1000000)
                     println()
+                    completed.countDown()
+                    println("###################### count" + completed.getCount)
                 }
             }
         }
@@ -143,19 +164,26 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
 
     var targets =Map[String,PollTarget]()
     var outStanding = new ConcurrentHashMap[Int,OutStanding]()
-
+    var completed = new CountDownLatch(targetset.size)
     val transport = new DefaultUdpTransportMapping()
+    transport.setThreadName(name)
     val snmp = new Snmp(transport)
 
 
 
     class MyTimeoutPolicy extends AnyRef with TimeoutModel {
-        var to = 1000L
-        override def getRequestTimeout(totalNumberOfRetries:Int, targetTimeout:Long) : long = { to }
+        var to = 2000L
+        var retry = 2
+        override def getRequestTimeout(totalNumberOfRetries:Int, targetTimeout:Long) : long = { 
+            printf("##########################  getRequestTimeout total: %d  targetTimeout: %d\n", totalNumberOfRetries, targetTimeout)
+            to*(retry+1)
+        }
+
         override def getRetryTimeout(retryCount:Int, totalNumberOfRetries:Int, targetTimeout:Long) : Long = {
-            if ( retryCount > 0 )
-                -1L
-            else
+            printf("##########################  getRetryTimeout retry: %d  total: %d  targetTimeout: %d\n", retryCount, totalNumberOfRetries, targetTimeout)
+//            if ( retryCount > retry )
+//                -1L
+//            else
                 to
         }
     }
@@ -176,18 +204,27 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
             }
             catch { case e:Exception => e.printStackTrace }
             val out = outStanding.remove(event.getRequest.getRequestID.toInt)
+            if ( out == null ) {
+                println("untracked response: put useful info here")
+                return
+            } 
+            val target = out.pollTarget
             val responseTime = System.nanoTime - out.lastTime
             if ( event != null ) {
                 val r = event.getResponse()
                 if ( r != null && r.size == 1 ) {
                     //println("GOT single: " + r.get(0).getVariable)
                     val ip = event.getPeerAddress.toString
-                    val target = targets.get(ip)
-                    target.get.dataSing(out.colSingIndex)=r.get(0)
-                    target.get.doCompletion()
-                    target.get.recordSingTiming(responseTime)
+                    target.dataSing(out.colSingIndex)=r.get(0)
+                    target.doCompletion()
+                    target.recordSingTiming(responseTime)
+                } else {
+                    out.pollTarget.doCompletionTimeout()
                 }
+            } else {
+                target.doCompletionTimeout()
             }
+
         }
     }
     class ReceiverBulk extends AnyRef with ResponseListener {
@@ -208,11 +245,11 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
             // address.
             try {
                 event.getSource().asInstanceOf[Snmp].cancel(event.getRequest(), this)
-/*
+
                 println("Thread " + Thread.currentThread.getName +
                     " response from: " + event.getPeerAddress +
-                    " with id: " + (if (event.getResponse == null ) -1 else event.getResponse.getRequestID)  )
-*/
+                    " with id: " + (if (event.getRequest.getRequestID == null ) -1 else event.getRequest.getRequestID)  )
+
             }
             catch { case e:Exception => e.printStackTrace }
             val out = outStanding.remove(event.getRequest.getRequestID.toInt)
@@ -223,7 +260,7 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
                 if ( r != null && r.size > 0 ) {
 
                     val ip = event.getPeerAddress.toString
-                    val target = targets.get(ip)
+                    val target = out.pollTarget
 
                     var jumpedRails=false
                     var lastoid=new OID("")
@@ -231,7 +268,7 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
                     var i = 0
                     // slight violation of encapsulation but faster this way since we
                     // must walk the result the result for jumping
-                    var d = target.get.dataBulk(out.colBulkIndex)
+                    var d = target.dataBulk(out.colBulkIndex)
                     //var d = dd(out.colIndex)
                     for ( i <- 0 to r.size-1) {
                         val vb = r.get(i)
@@ -258,27 +295,26 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
                         }
 
                     }
-                    target.get.recordBulkTiming(responseTime)
+                    target.recordBulkTiming(responseTime)
 
                     if ( !jumpedRails) {
                         // we are not done yet so get next oid
                         val nextoid = out.baseOid.clone.asInstanceOf[OID]
                         nextoid.append(lastoid.last)
-                        if ( target != None ) {
-                            target.get.sendNextPDU(snmp, this, nextoid, out.baseOid, out.colBulkIndex)
-                            println("#### NEXT")
-                        }
-                        else {
-                            println("missing entry for IP: " + ip)
-                        }
+                        target.sendNextPDU(snmp, this, nextoid, out.baseOid, out.colBulkIndex)
+                        println("#### NEXT")
                     } else {
-                        target.get.doCompletion()
+                        target.doCompletion()
                         println("##### DONE")
                     }
                 } else {
                     println("empty response")
+                    out.pollTarget.doCompletionTimeout()
                 }
 
+            } else {
+println("calling TO complete")
+                out.pollTarget.doCompletionTimeout()
             }
         }
     }
@@ -288,7 +324,9 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
         // setup listener
         snmp.setTimeoutModel(new MyTimeoutPolicy)
         // spawns the actual listening thread
+
         transport.listen()
+        transport.setThreadName(name)
         val listenerBulk = new ReceiverBulk
         val listenerSing = new ReceiverSingle
 
@@ -313,8 +351,9 @@ class PollWorker(targetset:Array[TargetSpec], iolock:Object) extends Thread {
         }
 
 
-        println("sleep..")
-        Thread.sleep(500000L);
+        println("waiting on latch...")
+        completed.await()
+        println("latch done")
         0
     }
 
