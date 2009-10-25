@@ -3,3 +3,10 @@
 \.chg\..*$
 \.rej$
 \.conflict\~$
+
+syntax: glob
+bin/**
+syntax: glob
+.classpath
+syntax: glob
+.project
