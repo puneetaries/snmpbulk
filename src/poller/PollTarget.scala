@@ -44,6 +44,9 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
         target.setRetries(2)
         target.setVersion(SnmpConstants.version2c)
         for( i <- 0 to colBulk.length-1) { dataBulk(i) = new scala.collection.mutable.LinkedHashMap[Int,VariableBinding]() }
+        dataSing = new Array[VariableBinding](colSing.length)
+        bulkTiming = List[long]()
+        singTiming = List[long]()
     }
     def doCompletionTimeout(worker:PollWorker, target:PollTarget) : Unit = {
         completion -= 1
@@ -71,17 +74,6 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
     def recordBulkTiming(t:long):Unit={bulkTiming += t}
     def recordSingTiming(t:long):Unit={singTiming += t}
 
-    def joins(itr:scala.Iterable[Object],s:String): String = {
-      val s = new StringBuilder(100);
-      for ( ai <- itr ){
-    	  s.append(ai.toString).append(',')
-      }
-      if ( s.length() > 0 )
-    	 s.setLength(s.length()-1)
-   	  s.toString
-
-    }
-    
     def dumpdata(worker:PollWorker) : Unit = {
         var df = new SimpleDateFormat("yyyyMMddHHmmss");
 
@@ -89,26 +81,19 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
         var f=new PrintStream(new BufferedOutputStream(new FileOutputStream(name)))
         try {
             
-            f.print("#SINGLE SECTION: ")
-            //dataSing.foldLeft(	)
-            for( i <- 0 to colSing.length-1) {
-                f.print(colSing(i) + "=")
-                f.print(variableToString(dataSing(i).getVariable))
-                f.println()
-                dataSing(i)=null
-            }
-            f.print("#BULK SECTION: ")
-            f.print("index,")
-            for(i <- 0 to colBulk.length-1){
-                f.print(colBulk(i))
-                if ( i!=colBulk.length-1) f.print(", ")
-            }
-            f.println()
+            f.println("#SINGLE SECTION: ")
+            dataSing.foreach( v => f.println( v.getOid + "=" + variableToString(v.getVariable) ) )
+            // kept this next "mapping" one just cause it was interesting
+            // f.println(  dataSing.map( v => v.getOid + "=" + variableToString(v.getVariable) ).mkString("\n")  )
+            f.println("#BULK SECTION: ")
+            f.println("index," + colBulk.mkString(","))
             
             val s = new StringBuilder(100);
             for ( index <- dataBulk(0).keys ) {
                 s.append(index)
                 s.append(',')
+
+                
                 for(i <- dataBulk.indices){
                     val v=dataBulk(i)(index).getVariable()
                     s.append(variableToString(v)).append(',')
@@ -117,15 +102,10 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
                 f.println(s)
                 s.clear()
             }
-            for(i <- 0 to colBulk.length-1)
-                dataBulk(i).clear
+            dataBulk.foreach( _.clear() )
 
-            f.println("#Bulk timings:")
-            for(l <- bulkTiming) f.print(" " + l/(1000000))
-            f.println()
-            f.println("#Single timings: ")
-            for(l <- singTiming) f.print(" " + l/1000000)
-            f.println()
+            f.println("#Bulk timings: " + bulkTiming.map( _ / 1000000).mkString(",") )
+            f.println("#Single timings: " + singTiming.map( _ / 1000000).mkString(",") )
             bulkTiming = List[long]()
             singTiming = List[long]()
         }
