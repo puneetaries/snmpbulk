@@ -131,10 +131,11 @@ object Main {
      */
     def main(args: Array[String]) :Unit = {
 
-        // 127.0.0.1/161/public
+    // 192.168.0.198/161/public,127.0.0.1/161/public,192.168.0.196/161/public 192.168.0.194/161/public
+
         var index=0
         try{
-            var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "THREAD:" + index, this) }
+            var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "THREAD:" + index, 10, this) }
             workers.foreach( t => t.start)
             workers.foreach( t => t.join)
             println("main complete")

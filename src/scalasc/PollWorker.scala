@@ -50,118 +50,12 @@ printf("%s %d %s\n",parts(0), parts(1).toInt, parts(2))
     }
 }
 
-class PollWorker(targetset:List[TargetSpec], name:String, iolock:Object) extends Thread {
+class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, iolock:Object) extends Thread {
 
-
-    case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
-        var dataBulk = new Array[scala.collection.mutable.LinkedHashMap[Int,VariableBinding]](colBulk.length)
-        var dataSing = new Array[VariableBinding](colSing.length)
-        var completion=colBulk.length + colSing.length
-        for( i <- 0 to colBulk.length-1) { dataBulk(i) = new scala.collection.mutable.LinkedHashMap[Int,VariableBinding]() }
-        var bulkTiming = List[long]()
-        var singTiming = List[long]()
-        val targetAddress = GenericAddress.parse("udp:" + ip + "/161")
-        val target = new CommunityTarget(targetAddress, new OctetString("public"))
-        target.setRetries(2)
-        target.setVersion(SnmpConstants.version2c)
-        def doCompletionTimeout() : Unit = {
-            completion -= 1
-println("timeout completion")
-            completed.countDown()  // giveup
-        }
-        def doCompletion() : Unit = {
-            completion -= 1
-            if ( completion== 0) {
-                iolock.synchronized {
-                    for( i <- 0 to colSing.length-1) {
-                        print("oid: " + colSing(i) + "=")
-                        printVariable(0,dataSing(i).getVariable)
-                        dataSing(i)=null
-                    }
-                    for(i <- 0 to colBulk.length-1){
-                        println("oid: " + colBulk(i))
-                        for(i_oid <- dataBulk(i).keys ) {
-                            val v = dataBulk(i)(i_oid).getVariable()
-                            printVariable(i_oid, v)
-                        }
-                        dataBulk(i).clear
-                    }
-                    println("Bulk timings:")
-                    for(l <- bulkTiming) print(" " + l/(1000000))
-                    println()
-                    println("Single timings: ")
-                    for(l <- singTiming) print(" " + l/1000000)
-                    println()
-                    completed.countDown()
-                    println("###################### count" + completed.getCount)
-                }
-            }
-        }
-        def printVariable(i:int, v:Variable):Unit =
-        {
-            print("oid: " + i + " var: ")
-            v match {
-                case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
-                case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
-                case _ => print (" " + v + " ")
-            }
-            println()
-        }
-/*
-                println("this oid: " + oid + " base oid: " + out.baseOid)
-                if ( oid.startsWith(out.baseOid) ) {
-                    print("i: " + i + "{ ")
-                    v match {
-                        case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
-                        case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
-                        case _ => print (" " + v + " ")
-                    }
-                    println(" } ")
-                } else {
-            }
-*/
-        
-        
-
-        var currPDU = new PDU()
-
-        def sendInitialPDU(snmp:Snmp, listenerBulk:ResponseListener, listenerSing:ResponseListener) : Unit = {
-            var index=0
-            for ( oid <- colBulk) {
-                currPDU = new PDU()
-                currPDU.add(new VariableBinding(oid))
-                currPDU.setMaxRepetitions(5)
-                currPDU.setType(PDU.GETBULK)
-                snmp.sendPDU(currPDU, target, null, listenerBulk)
-                outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,this, index, -1,System.nanoTime))
-                println("sent bulk " + currPDU.getRequestID.toInt + " for " + oid)
-                index += 1
-            }
-            index=0
-            for ( oid <- colSing) {
-                currPDU = new PDU()
-                currPDU.add(new VariableBinding(oid))
-                currPDU.setType(PDU.GETNEXT)
-                snmp.sendPDU(currPDU, target, null, listenerSing)
-                outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,this, -1, index,System.nanoTime))
-                println("sent single " + currPDU.getRequestID.toInt + " for " + oid)
-                index += 1
-            }
-        }
-        def sendNextPDU(snmp:Snmp, listener:ResponseListener, nextOid:OID, baseOid:OID, index:Int) : Unit = {
-            currPDU = new PDU()
-            currPDU.add(new VariableBinding(nextOid))
-            currPDU.setMaxRepetitions(5)
-            currPDU.setType(PDU.GETBULK)
-            snmp.sendPDU(currPDU, target, null, listener)
-            outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,baseOid,this, index, -1,System.nanoTime))
-            println("sent " + currPDU.getRequestID + " for " + nextOid)
-        }
-        def recordBulkTiming(t:long):Unit={bulkTiming += t}
-        def recordSingTiming(t:long):Unit={singTiming += t}
-    }
     case class OutStanding(requestId:int, baseOid:OID, pollTarget:PollTarget, colBulkIndex:int, colSingIndex:int, lastTime:long)
 
+    val listenerBulk = new ReceiverBulk
+    val listenerSing = new ReceiverSingle
     var targets =Map[String,PollTarget]()
     var outStanding = new ConcurrentHashMap[Int,OutStanding]()
     var completed = new CountDownLatch(targetset.size)
@@ -172,20 +66,53 @@ println("timeout completion")
 
 
     class MyTimeoutPolicy extends AnyRef with TimeoutModel {
-        var to = 2000L
-        var retry = 2
+        var to = 1000L
+        var retry = 1
         override def getRequestTimeout(totalNumberOfRetries:Int, targetTimeout:Long) : long = { 
-            printf("##########################  getRequestTimeout total: %d  targetTimeout: %d\n", totalNumberOfRetries, targetTimeout)
+//            printf("##########################  getRequestTimeout total: %d  targetTimeout: %d\n", totalNumberOfRetries, targetTimeout)
             to*(retry+1)
         }
 
         override def getRetryTimeout(retryCount:Int, totalNumberOfRetries:Int, targetTimeout:Long) : Long = {
-            printf("##########################  getRetryTimeout retry: %d  total: %d  targetTimeout: %d\n", retryCount, totalNumberOfRetries, targetTimeout)
+  //          printf("##########################  getRetryTimeout retry: %d  total: %d  targetTimeout: %d\n", retryCount, totalNumberOfRetries, targetTimeout)
 //            if ( retryCount > retry )
 //                -1L
 //            else
                 to
         }
+    }
+
+     def sendInitialPDU(pollTarget:PollTarget) : Unit = {
+        var index=0
+        for ( oid <- pollTarget.colBulk) {
+            var currPDU = new PDU()
+            currPDU.add(new VariableBinding(oid))
+            currPDU.setMaxRepetitions(5)
+            currPDU.setType(PDU.GETBULK)
+            snmp.sendPDU(currPDU, pollTarget.target, null, listenerBulk)
+            outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,pollTarget, index, -1,System.nanoTime))
+            println("sent bulk " + currPDU.getRequestID.toInt + " for " + oid)
+            index += 1
+        }
+        index=0
+        for ( oid <- pollTarget.colSing) {
+            var currPDU = new PDU()
+            currPDU.add(new VariableBinding(oid))
+            currPDU.setType(PDU.GETNEXT)
+            snmp.sendPDU(currPDU, pollTarget.target, null, listenerSing)
+            outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,oid,pollTarget, -1, index,System.nanoTime))
+            println("sent single " + currPDU.getRequestID.toInt + " for " + oid)
+            index += 1
+        }
+    }
+    def sendNextPDU(pollTarget:PollTarget, nextOid:OID, baseOid:OID, index:Int) : Unit = {
+        var currPDU = new PDU()
+        currPDU.add(new VariableBinding(nextOid))
+        currPDU.setMaxRepetitions(5)
+        currPDU.setType(PDU.GETBULK)
+        snmp.sendPDU(currPDU, pollTarget.target, null, listenerBulk)
+        outStanding.put(currPDU.getRequestID.toInt, new OutStanding(currPDU.getRequestID.toInt,baseOid,pollTarget, index, -1,System.nanoTime))
+        println("sent " + currPDU.getRequestID + " for " + nextOid)
     }
 
     class ReceiverSingle extends AnyRef with ResponseListener {
@@ -216,13 +143,13 @@ println("timeout completion")
                     //println("GOT single: " + r.get(0).getVariable)
                     val ip = event.getPeerAddress.toString
                     target.dataSing(out.colSingIndex)=r.get(0)
-                    target.doCompletion()
+                    target.doCompletion(PollWorker.this)
                     target.recordSingTiming(responseTime)
                 } else {
-                    out.pollTarget.doCompletionTimeout()
+                    out.pollTarget.doCompletionTimeout(PollWorker.this)
                 }
             } else {
-                target.doCompletionTimeout()
+                target.doCompletionTimeout(PollWorker.this)
             }
 
         }
@@ -281,7 +208,8 @@ println("timeout completion")
                         if ( oid.startsWith(out.baseOid) ) {
                             val lastOidIndex = vb.getOid().last()
                             d(lastOidIndex)=vb
-/*                            print("i: " + i + "{ ")
+/*
+                            print("i: " + i + "{ ")
                             v match {
                                 case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
                                 case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
@@ -301,20 +229,20 @@ println("timeout completion")
                         // we are not done yet so get next oid
                         val nextoid = out.baseOid.clone.asInstanceOf[OID]
                         nextoid.append(lastoid.last)
-                        target.sendNextPDU(snmp, this, nextoid, out.baseOid, out.colBulkIndex)
+                        sendNextPDU(target, nextoid, out.baseOid, out.colBulkIndex)
                         println("#### NEXT")
                     } else {
-                        target.doCompletion()
+                        target.doCompletion(PollWorker.this)
                         println("##### DONE")
                     }
                 } else {
                     println("empty response")
-                    out.pollTarget.doCompletionTimeout()
+                    out.pollTarget.doCompletionTimeout(PollWorker.this)
                 }
 
             } else {
 println("calling TO complete")
-                out.pollTarget.doCompletionTimeout()
+                out.pollTarget.doCompletionTimeout(PollWorker.this)
             }
         }
     }
@@ -327,8 +255,6 @@ println("calling TO complete")
 
         transport.listen()
         transport.setThreadName(name)
-        val listenerBulk = new ReceiverBulk
-        val listenerSing = new ReceiverSingle
 
         // setup targets
 
@@ -346,14 +272,23 @@ println("calling TO complete")
         //targets = Map("127.0.0.1/161" -> new PollTarget("127.0.0.1", pollset) )
 
         //val targets = Map(1 -> 1, 1 -> 2 )
-        for ( pt <- targets.values ) {
-            pt.sendInitialPDU(snmp, listenerBulk, listenerSing)
+        while (true ) {
+            
+            for ( pt <- targets.values ) {
+                pt.init
+                sendInitialPDU(pt)
+            }
+            println("waiting on latch...")
+            completed.await()
+            println("latch done -----------------------------------")
+            val now = System.currentTimeMillis
+            val sleeptime = intervalSecs*1000 -  now % (intervalSecs*1000)
+
+            println("sleeping for: " + sleeptime)
+            Thread.sleep(sleeptime)
+            completed = new CountDownLatch(targetset.size)
         }
-
-
-        println("waiting on latch...")
-        completed.await()
-        println("latch done")
+//Thread.sleep(50000L)
         0
     }
 
