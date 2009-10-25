@@ -100,11 +100,6 @@ println("timeout completion")
                     f.print(',')
                 }
                 f.println()
-//                    for ( index <- m.keys) {
-//                        val v = m(index).getVariable()
-//                        printVariable(f,v)
-//                    }
-//                }
             }
             for(i <- 0 to colBulk.length-1)
                 dataBulk(i).clear
