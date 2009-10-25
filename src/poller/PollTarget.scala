@@ -80,22 +80,26 @@ println("timeout completion")
             
             for( i <- 0 to colSing.length-1) {
                 f.print(colSing(i) + "=")
-                print(variableToString(dataSing(i).getVariable))
+                f.print(variableToString(dataSing(i).getVariable))
+                f.println()
                 dataSing(i)=null
             }
+            f.println("BULK SECTION")
+            f.println("index,")
             for(i <- 0 to colBulk.length-1){
                 f.print(colBulk(i))
-                if ( i!=colBulk.length-1) print(',')
+                if ( i!=colBulk.length-1) f.print(", ")
             }
+            f.println()
             for ( index <- dataBulk(0).keys ) {
-                print(index)
-                print(',')
+                f.print(index)
+                f.print(',')
                 for(i <- dataBulk.indices){
                     val v=dataBulk(i)(index).getVariable()
-                    print(variableToString(v))
-                    print(',')
+                    f.print(variableToString(v))
+                    f.print(',')
                 }
-                println()
+                f.println()
 //                    for ( index <- m.keys) {
 //                        val v = m(index).getVariable()
 //                        printVariable(f,v)

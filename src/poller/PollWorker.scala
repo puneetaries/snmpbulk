@@ -254,7 +254,7 @@ println("calling TO complete")
         // spawns the actual listening thread
 
         transport.listen()
-        transport.setThreadName(name)
+        transport.setThreadName("transport for " + name)
 
         // setup targets
 

@@ -136,7 +136,7 @@ object Main {
         var index=0
         try{
             println("main start")
-            var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "THREAD:" + index, 10, this) }
+            var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "pollworker:" + index, 10, this) }
             workers.foreach( t => t.start)
             workers.foreach( t => t.join)
             println("main complete")
