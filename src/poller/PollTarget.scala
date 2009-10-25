@@ -88,19 +88,9 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
             f.println("#BULK SECTION: ")
             f.println("index," + colBulk.mkString(","))
             
-            val s = new StringBuilder(100);
             for ( index <- dataBulk(0).keys ) {
-                s.append(index)
-                s.append(',')
-
-                
-                for(i <- dataBulk.indices){
-                    val v=dataBulk(i)(index).getVariable()
-                    s.append(variableToString(v)).append(',')
-                }
-                s.setLength(s.length()-1)
-                f.println(s)
-                s.clear()
+            	val omrec = dataBulk.map(  mm => variableToString( mm(index).getVariable() )  ).mkString(",")
+                f.println(index + "," + omrec)
             }
             dataBulk.foreach( _.clear() )
 
