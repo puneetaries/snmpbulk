@@ -146,10 +146,10 @@ class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, iol
                     target.doCompletion(PollWorker.this)
                     target.recordSingTiming(responseTime)
                 } else {
-                    out.pollTarget.doCompletionTimeout(PollWorker.this)
+                    out.pollTarget.doCompletionTimeout(PollWorker.this, out.pollTarget)
                 }
             } else {
-                target.doCompletionTimeout(PollWorker.this)
+                target.doCompletionTimeout(PollWorker.this, out.pollTarget)
             }
 
         }
@@ -237,12 +237,12 @@ class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, iol
                     }
                 } else {
                     println("empty response")
-                    out.pollTarget.doCompletionTimeout(PollWorker.this)
+                    out.pollTarget.doCompletionTimeout(PollWorker.this, out.pollTarget)
                 }
 
             } else {
 println("calling TO complete")
-                out.pollTarget.doCompletionTimeout(PollWorker.this)
+                out.pollTarget.doCompletionTimeout(PollWorker.this, out.pollTarget)
             }
         }
     }

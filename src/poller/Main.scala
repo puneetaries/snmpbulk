@@ -20,7 +20,7 @@ import org.snmp4j.mp._
 import org.snmp4j.event._
 import java.lang.Thread
 import org.snmp4j.util._
-
+import java.io._
 import scala.collection.jcl._
 
 object Main {
@@ -135,10 +135,13 @@ object Main {
 
         var index=0
         try{
+        		if ( (new File(args(args.length-2))).exists() ) {
+        		  //; read from file the list of things to poll
+        		}
             println("main start")
             var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "pollworker:" + index, 10, this) }
-            workers.foreach( t => t.start)
-            workers.foreach( t => t.join)
+            workers.foreach( _.start)
+            workers.foreach( _.join)
             println("main complete")
         }
         catch {

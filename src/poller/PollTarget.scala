@@ -45,9 +45,9 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
         target.setVersion(SnmpConstants.version2c)
         for( i <- 0 to colBulk.length-1) { dataBulk(i) = new scala.collection.mutable.LinkedHashMap[Int,VariableBinding]() }
     }
-    def doCompletionTimeout(worker:PollWorker) : Unit = {
+    def doCompletionTimeout(worker:PollWorker, target:PollTarget) : Unit = {
         completion -= 1
-println("timeout completion")
+        println("timeout completion for IP: " + target.targetAddress)
         worker.completed.countDown()  // giveup
     }
     def doCompletion(worker:PollWorker) : Unit = {
@@ -71,45 +71,63 @@ println("timeout completion")
     def recordBulkTiming(t:long):Unit={bulkTiming += t}
     def recordSingTiming(t:long):Unit={singTiming += t}
 
+    def joins(itr:scala.Iterable[Object],s:String): String = {
+      val s = new StringBuilder(100);
+      for ( ai <- itr ){
+    	  s.append(ai.toString).append(',')
+      }
+      if ( s.length() > 0 )
+    	 s.setLength(s.length()-1)
+   	  s.toString
+
+    }
+    
     def dumpdata(worker:PollWorker) : Unit = {
-        var df = new SimpleDateFormat("yyyyMMddHHmm");
+        var df = new SimpleDateFormat("yyyyMMddHHmmss");
 
         var name = new File("snmp_" + ip + "_" + df.format(new Date()))
         var f=new PrintStream(new BufferedOutputStream(new FileOutputStream(name)))
         try {
             
+            f.print("#SINGLE SECTION: ")
+            //dataSing.foldLeft(	)
             for( i <- 0 to colSing.length-1) {
                 f.print(colSing(i) + "=")
                 f.print(variableToString(dataSing(i).getVariable))
                 f.println()
                 dataSing(i)=null
             }
-            f.println("BULK SECTION")
-            f.println("index,")
+            f.print("#BULK SECTION: ")
+            f.print("index,")
             for(i <- 0 to colBulk.length-1){
                 f.print(colBulk(i))
                 if ( i!=colBulk.length-1) f.print(", ")
             }
             f.println()
+            
+            val s = new StringBuilder(100);
             for ( index <- dataBulk(0).keys ) {
-                f.print(index)
-                f.print(',')
+                s.append(index)
+                s.append(',')
                 for(i <- dataBulk.indices){
                     val v=dataBulk(i)(index).getVariable()
-                    f.print(variableToString(v))
-                    f.print(',')
+                    s.append(variableToString(v)).append(',')
                 }
-                f.println()
+                s.setLength(s.length()-1)
+                f.println(s)
+                s.clear()
             }
             for(i <- 0 to colBulk.length-1)
                 dataBulk(i).clear
 
-            f.println("Bulk timings:")
+            f.println("#Bulk timings:")
             for(l <- bulkTiming) f.print(" " + l/(1000000))
             f.println()
-            f.println("Single timings: ")
+            f.println("#Single timings: ")
             for(l <- singTiming) f.print(" " + l/1000000)
             f.println()
+            bulkTiming = List[long]()
+            singTiming = List[long]()
         }
         finally {
             f.close()
