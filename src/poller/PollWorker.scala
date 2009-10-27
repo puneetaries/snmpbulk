@@ -28,6 +28,25 @@ import java.util.concurrent.CountDownLatch
 
 //import scala.collection.jcl._
 
+object PollWorker {
+  def apply(context:XmlCtx) = {
+
+    val attroids = context.context("table").context("attributes").listNullable("oid").map[OID]( ctx => new OID(ctx.string) ).toList
+    val measoids = context.context("table").context("measurements").list("oid").map[OID]( ctx => new OID(ctx.string) ).toList
+    val bulkoids = (attroids ::: measoids).toArray
+    
+    val singoids:Array[OID] = context.context("table").list("singleoid").map[OID]( ctx => new OID(ctx.string) ).toArray
+    
+    val srcs = context.context("sources")
+    val port = srcs.int("port")
+     
+    val targets = srcs.list("target").map( ctx => new TargetSpec( ctx.string("ip") , port, ctx.string("comm") ) ).toList
+    new PollWorker(targets, "pollworker", context.long("intervalSecs"), bulkoids, singoids, new Object())
+  	
+  }
+}
+
+
 case class TargetSpec(ip:String, port:Int, community:String)
 // multi constructor pattern
 object TargetSpec {
@@ -50,7 +69,7 @@ printf("%s %d %s\n",parts(0), parts(1).toInt, parts(2))
     }
 }
 
-class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, iolock:Object) extends Thread {
+class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, colBulk:Array[OID], colSing:Array[OID], iolock:Object) extends Thread {
 
     case class OutStanding(requestId:int, baseOid:OID, pollTarget:PollTarget, colBulkIndex:int, colSingIndex:int, lastTime:long)
 
@@ -191,32 +210,19 @@ class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, iol
 
                     var jumpedRails=false
                     var lastoid=new OID("")
-//                    println("got response size: " + r.size)
                     var i = 0
                     // slight violation of encapsulation but faster this way since we
                     // must walk the result the result for jumping
                     var d = target.dataBulk(out.colBulkIndex)
-                    //var d = dd(out.colIndex)
-                    for ( i <- 0 to r.size-1) {
-                        val vb = r.get(i)
+                    for ( vb <- r.toArray ) {
                         val oid = vb.getOid
                         lastoid = oid
                         val v = vb.getVariable()
                         // make sure we have not jumped the rails...
 
-//                        println("this oid: " + oid + " base oid: " + out.baseOid)
                         if ( oid.startsWith(out.baseOid) ) {
                             val lastOidIndex = vb.getOid().last()
                             d(lastOidIndex)=vb
-/*
-                            print("i: " + i + "{ ")
-                            v match {
-                                case vx:TimeTicks => print(" timeticks \"" + vx.toString() + "\" ")
-                                case vx:OctetString => print(" \"" + vx.toASCII('\0') + "\" ")
-                                case _ => print (" " + v + " ")
-                            }
-                            println(" } ")
-*/
                         } else {
                             println("JUMPED")
                             jumpedRails=true
@@ -258,12 +264,12 @@ println("calling TO complete")
 
         // setup targets
 
-        val pollsetBulk:Array[OID] = Array[OID](new OID("1.3.6.1.2.1.2.2.1.2"),  new OID("1.3.6.1.2.1.2.2.1.10"),  new OID("1.3.6.1.2.1.2.2.1.16"))
-        val pollsetSing:Array[OID] = Array[OID](new OID(".1.3.6.1.2.1.1.3"), new OID(".1.3.6.1.2.1.1.1"))
+//        val pollsetBulk:Array[OID] = Array[OID](new OID("1.3.6.1.2.1.2.2.1.2"),  new OID("1.3.6.1.2.1.2.2.1.10"),  new OID("1.3.6.1.2.1.2.2.1.16"))
+//        val pollsetSing:Array[OID] = Array[OID](new OID(".1.3.6.1.2.1.1.3"), new OID(".1.3.6.1.2.1.1.1"))
 
         targets = Map()
         for ( target <- targetset ) {
-            targets += target.ip + "/" + target.port.toString -> new PollTarget(target.ip, pollsetBulk, pollsetSing)
+            targets += target.ip + "/" + target.port.toString -> new PollTarget(target.ip, colBulk, colSing)
         }
 //        targets = Map("192.168.0.198/161" -> new PollTarget("192.168.0.198", pollsetBulk, pollsetSing),
 //                      "127.0.0.1/161"     -> new PollTarget("127.0.0.1", pollsetBulk, pollsetSing) )

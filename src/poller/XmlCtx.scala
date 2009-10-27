@@ -35,9 +35,9 @@ object XmlCtx
             val topele = rootSeq \\ "config"
             _root = new XmlCtx(topele, "config")
             if ( _root.is("basedir") )
-                _baseDir = _root.getFile("basedir")
-            else if ( System.getenv("GMS_HOME") != null )
-                _baseDir = new File(System.getenv("GMS_HOME"))
+                _baseDir = _root.file("basedir")
+            else if ( System.getenv("SNMPBULK_HOME") != null )
+                _baseDir = new File(System.getenv("SNMPBULK_HOME"))
             else
             {
                 println("WARNING: using current directory as the base directory")
@@ -62,23 +62,26 @@ class XmlCtx (_here:NodeSeq, _fullpath:String)
         if ( here.length!=1 ) throw new ConfigException("Expecting a single entry for a context constructor: " + childpath + " but got " + here.length)
     }
 
-    def getContext(childpath:String) : XmlCtx = {
+    def context(childpath:String) : XmlCtx = {
         new XmlCtx(this, childpath)
     }
 
     def is(childpath:String) : boolean = (here \ childpath).length>0
 
-    def getString(childpath:String)  : String  = (expectOne(childpath)).text
-    def getString()  : String  = here.text
+    def string(childpath:String)  : String  = (expectOne(childpath)).text
+    def string()  : String  = here.text
 
-    def getBoolean(childpath:String) : boolean = strToBoolean(getString(childpath))
-    def getBoolean() : boolean = strToBoolean(getString())
+    def bool(childpath:String) : boolean = strToBoolean(string(childpath))
+    def bool() : boolean = strToBoolean(string())
 
-    def getLong(childpath:String) : Long = getString(childpath).toLong
-    def getLong() : Long = getString().toLong
+    def long(childpath:String) : Long = string(childpath).toLong
+    def long() : Long = string().toLong
 
-    def getFile(childpath:String) : File = checkFile(getString(childpath))
-    def getFile() : File = checkFile(getString())
+    def int(childpath:String) : Int = string(childpath).toInt
+    def int() : Long = string().toInt
+
+    def file(childpath:String) : File = checkFile(string(childpath))
+    def file() : File = checkFile(string())
 
     val reInterval = """^\s*(\d+)\s*([A-z]+)\s*$""".r
 
@@ -112,11 +115,11 @@ class XmlCtx (_here:NodeSeq, _fullpath:String)
         }
     }
 
-    def getInterval(childpath:String) : Long = strToInterval(getString(childpath))
-    def getInterval() : Long = strToInterval(getString())
+    def interval(childpath:String) : Long = strToInterval(string(childpath))
+    def interval() : Long = strToInterval(string())
 
-    def getList(childpath:String)  : Seq[XmlCtx]  = (expectList(childpath)).map(n => new XmlCtx(n,childpath))
-    def getListNullable(childpath:String)  : Seq[XmlCtx]  = (here \ childpath).map(n => new XmlCtx(n,childpath))
+    def list(childpath:String)  : Seq[XmlCtx]  = (expectList(childpath)).map(n => new XmlCtx(n,childpath))
+    def listNullable(childpath:String)  : Seq[XmlCtx]  = (here \ childpath).map(n => new XmlCtx(n,childpath))
 
     def checkFile(filename:String) : File =
     {

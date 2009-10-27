@@ -68,6 +68,7 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
         v match {
             case vx:TimeTicks => vx.toString()
             case vx:OctetString => vx.toASCII(' ')
+            case null => "null"
             case _ => v.toString()
         }
     }
@@ -88,8 +89,14 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
             f.println("#BULK SECTION: ")
             f.println("index," + colBulk.mkString(","))
             
+            
             for ( index <- dataBulk(0).keys ) {
-            	val omrec = dataBulk.map(  mm => variableToString( mm(index).getVariable() )  ).mkString(",")
+            	val omrec = dataBulk.map(  mm => variableToString( 
+            		if (!mm.contains(index))
+            		{ new Null() } 
+            		else 
+            		{mm(index).getVariable()} 
+            	)  ).mkString(",")
                 f.println(index + "," + omrec)
             }
             dataBulk.foreach( _.clear() )
@@ -98,6 +105,10 @@ case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
             f.println("#Single timings: " + singTiming.map( _ / 1000000).mkString(",") )
             bulkTiming = List[long]()
             singTiming = List[long]()
+        }
+        catch {
+          case x:Exception => println( x )
+          	x.printStackTrace
         }
         finally {
             f.close()

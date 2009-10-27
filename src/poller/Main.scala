@@ -133,20 +133,15 @@ object Main {
 
     // 192.168.0.198/161/public,127.0.0.1/161/public,192.168.0.196/161/public 192.168.0.194/161/public
 
-        var index=0
-        try{
-        		if ( (new File(args(args.length-2))).exists() ) {
-        		  //; read from file the list of things to poll
-        		}
-            println("main start")
-            var workers = args.map[PollWorker]{ arg => index += 1; println(arg); new PollWorker(TargetSpec.createArray(arg), "pollworker:" + index, 10, this) }
-            workers.foreach( _.start)
-            workers.foreach( _.join)
-            println("main complete")
-        }
-        catch {
-            case e: Exception => println(e)
-        }
+		XmlCtx.init(new File(args(0)))
+  		var cfg = XmlCtx.root.context("poller")
+		var w=PollWorker(cfg)
+		w.start
+		w.join
+        println("joined with workers")                           
     }
 
 }
+
+
+
