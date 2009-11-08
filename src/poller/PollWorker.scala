@@ -25,6 +25,9 @@ import java.lang.Thread
 import org.snmp4j.util._
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
+import java.io.File
+import scala.io.Source
+
 
 //import scala.collection.jcl._
 
@@ -39,10 +42,24 @@ object PollWorker {
     
     val srcs = context.context("sources")
     val port = srcs.int("port")
-     
-    val targets = srcs.list("target").map( ctx => new TargetSpec( ctx.string("ip") , port, ctx.string("comm") ) ).toList
+
+    var targets:List[TargetSpec]=List[TargetSpec]()
+    if ( srcs.is("target") ) {
+    	targets = srcs.list("target").map( ctx => new TargetSpec( ctx.string("ip") , port, ctx.string("comm") ) ).toList
+    } else {
+        targets=getTargets(srcs.file("targetfile"), port)
+    }
     new PollWorker(targets, "pollworker", context.long("intervalSecs"), bulkoids, singoids, new Object())
   	
+  }
+  def getTargets(filename:File, port:Int) : List[TargetSpec] = {
+    Source.fromFile(filename).getLines
+    	.filter( line => !line.matches("""^\s*#""") )
+    	.map( line => {
+    		val fields = line.split(" ")
+            new TargetSpec( fields(0), port, fields(1) )
+            }
+    	).toList
   }
 }
 
