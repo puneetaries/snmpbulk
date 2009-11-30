@@ -30,14 +30,16 @@ import java.util.Date
 import java.io._
 
 
-case class PollTarget(ip:String, colBulk:Array[OID], colSing:Array[OID]) {
+case class PollTarget(ip:String, community:String, colBulk:Array[OID], colSing:Array[OID]) {
     var dataBulk = new Array[scala.collection.mutable.LinkedHashMap[Int,VariableBinding]](colBulk.length)
     var dataSing = new Array[VariableBinding](colSing.length)
     var completion=0 //=colBulk.length + colSing.length
     var bulkTiming = List[long]()
     var singTiming = List[long]()
     val targetAddress = GenericAddress.parse("udp:" + ip + "/161")
-    val target = new CommunityTarget(targetAddress, new OctetString("public"))
+println("UDP thing: " + ip + ":")    
+
+    val target = new CommunityTarget(targetAddress, new OctetString(community))
     //init()
     def init() : Unit = {
         completion = colBulk.length + colSing.length

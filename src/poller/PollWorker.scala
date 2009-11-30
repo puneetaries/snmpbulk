@@ -49,17 +49,19 @@ object PollWorker {
     } else {
         targets=getTargets(srcs.file("targetfile"), port)
     }
-    new PollWorker(targets, "pollworker", context.long("intervalSecs"), bulkoids, singoids, new Object())
+    new PollWorker(targets, "pollworker", context.long("intervalSecs"), context.long("intervalSecs"), bulkoids, singoids, new Object())
   	
   }
   def getTargets(filename:File, port:Int) : List[TargetSpec] = {
-    Source.fromFile(filename).getLines
-    	.filter( line => !line.matches("""^\s*#""") )
+	  Source.fromFile(filename, "UTF-8").getLines
+    	.filter( line => !(line.stripLineEnd.matches("""^\s*#.*$""") || line.split("""\s+""").length < 2) )
     	.map( line => {
-    		val fields = line.split(" ")
+    	  val fields = line.split("""\s+""")
+          if ( fields(0)!=null && fields(1)!=null )
             new TargetSpec( fields(0), port, fields(1) )
-            }
-    	).toList
+          else 
+            null
+    	}).filter( _ != null ).toList
   }
 }
 
@@ -86,7 +88,7 @@ printf("%s %d %s\n",parts(0), parts(1).toInt, parts(2))
     }
 }
 
-class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, colBulk:Array[OID], colSing:Array[OID], iolock:Object) extends Thread {
+class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, intervalOffsetSecs:long, colBulk:Array[OID], colSing:Array[OID], iolock:Object) extends Thread {
 
     case class OutStanding(requestId:int, baseOid:OID, pollTarget:PollTarget, colBulkIndex:int, colSingIndex:int, lastTime:long)
 
@@ -102,8 +104,8 @@ class PollWorker(targetset:List[TargetSpec], name:String, intervalSecs:long, col
 
 
     class MyTimeoutPolicy extends AnyRef with TimeoutModel {
-        var to = 1000L
-        var retry = 1
+        var to = 4000L
+        var retry = 4
         override def getRequestTimeout(totalNumberOfRetries:Int, targetTimeout:Long) : long = { 
 //            printf("##########################  getRequestTimeout total: %d  targetTimeout: %d\n", totalNumberOfRetries, targetTimeout)
             to*(retry+1)
@@ -286,7 +288,7 @@ println("calling TO complete")
 
         targets = Map()
         for ( target <- targetset ) {
-            targets += target.ip + "/" + target.port.toString -> new PollTarget(target.ip, colBulk, colSing)
+            targets += target.ip + "/" + target.port.toString -> new PollTarget(target.ip, target.community, colBulk, colSing)
         }
 //        targets = Map("192.168.0.198/161" -> new PollTarget("192.168.0.198", pollsetBulk, pollsetSing),
 //                      "127.0.0.1/161"     -> new PollTarget("127.0.0.1", pollsetBulk, pollsetSing) )
@@ -305,7 +307,7 @@ println("calling TO complete")
             completed.await()
             println("latch done -----------------------------------")
             val now = System.currentTimeMillis
-            val sleeptime = intervalSecs*1000 -  now % (intervalSecs*1000)
+            val sleeptime = (intervalSecs*1000 -  now % (intervalSecs*1000)) + intervalOffsetSecs * 1000
 
             println("sleeping for: " + sleeptime)
             Thread.sleep(sleeptime)
